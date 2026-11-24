@@ -34,6 +34,9 @@ const GAME_HTML = `<!DOCTYPE html>
   #auto { color: #191419; background: #39ff6a; border-radius: 999px; padding: 2px 12px;
     font-size: 15px; font-weight: 700; letter-spacing: 2px; display: none; }
   #auto.on { display: inline-block; }
+  #paused { color: #191419; background: #ffd23f; border-radius: 999px; padding: 2px 12px;
+    font-size: 15px; font-weight: 700; letter-spacing: 2px; display: none; }
+  #paused.on { display: inline-block; }
   canvas { width: min(76vh, 740px); height: min(76vh, 740px); background: #14101a;
     border: 2px solid #2c2436; border-radius: 12px;
     box-shadow: 0 0 40px rgba(57,255,106,.12), 0 0 60px rgba(196,28,131,.10); }
@@ -54,9 +57,9 @@ const GAME_HTML = `<!DOCTYPE html>
 <body>
 <h1>GLOW <span>SNAKE</span></h1>
 <div class="sub">BUILT FROM ONE PROMPT &middot; BY AN AI AGENT</div>
-<div class="hud"><span>SCORE <b id="score">0</b></span><span>BEST <b id="best">0</b></span><span id="auto">AUTO-PLAY</span></div>
+<div class="hud"><span>SCORE <b id="score">0</b></span><span>BEST <b id="best">0</b></span><span id="auto">AUTO-PLAY</span><span id="paused">PAUSED</span></div>
 <canvas id="game" width="720" height="720"></canvas>
-<div class="hint"><kbd>&larr;</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd> <kbd>&rarr;</kbd> or <kbd>WASD</kbd> to take over &middot; <kbd>R</kbd> to restart &middot; it plays itself until you steer</div>
+<div class="hint"><kbd>&larr;</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd> <kbd>&rarr;</kbd> or <kbd>WASD</kbd> to take over &middot; <kbd>Space</kbd> to pause &middot; <kbd>R</kbd> to restart &middot; it plays itself until you steer &middot; every 5th orb is golden (+3)</div>
 <div id="over"><div class="card"><h2>GAME OVER</h2><p id="final">Score 0</p><button onclick="resetGame()">PLAY AGAIN</button></div></div>
 <script>
 (function () {
@@ -66,19 +69,22 @@ const GAME_HTML = `<!DOCTYPE html>
   var scoreEl = document.getElementById('score');
   var bestEl = document.getElementById('best');
   var autoEl = document.getElementById('auto');
+  var pausedEl = document.getElementById('paused');
   var overEl = document.getElementById('over');
   var finalEl = document.getElementById('final');
   var best = 0;
   try { best = parseInt(localStorage.getItem('glow-snake-best') || '0', 10) || 0; } catch (e) {}
   bestEl.textContent = best;
 
-  var snake, dir, queue, orb, score, alive, lastTick, speed, auto;
+  var snake, dir, queue, orb, score, alive, lastTick, speed, auto, golden, orbsEaten, paused;
   function placeOrb() {
     var p;
     do {
       p = { x: Math.floor(Math.random() * N), y: Math.floor(Math.random() * N) };
     } while (snake.some(function (s) { return s.x === p.x && s.y === p.y; }));
     orb = p;
+    // Every 5th orb is golden and worth 3 points instead of 1.
+    golden = orbsEaten > 0 && (orbsEaten + 1) % 5 === 0;
   }
   function resetGame() {
     snake = [{ x: 15, y: 15 }, { x: 14, y: 15 }, { x: 13, y: 15 }];
@@ -88,11 +94,25 @@ const GAME_HTML = `<!DOCTYPE html>
     alive = true;
     speed = 8;
     auto = true; // plays itself until the player steers
+    orbsEaten = 0;
+    golden = false;
+    paused = false;
     scoreEl.textContent = '0';
     overEl.classList.remove('show');
     autoEl.classList.add('on');
+    pausedEl.classList.remove('on');
     placeOrb();
     lastTick = performance.now();
+  }
+  function togglePause() {
+    if (!alive) return;
+    paused = !paused;
+    if (paused) {
+      pausedEl.classList.add('on');
+    } else {
+      pausedEl.classList.remove('on');
+      lastTick = performance.now(); // do not jump forward on resume
+    }
   }
   function autoDir() {
     // Greedy autopilot: head for the orb, never turn into a wall or the body.
@@ -119,7 +139,7 @@ const GAME_HTML = `<!DOCTYPE html>
     return bestD;
   }
   function tick(now) {
-    if (!alive) return;
+    if (!alive || paused) return;
     var stepMs = 1000 / speed;
     if (now - lastTick < stepMs) return;
     lastTick = now;
@@ -139,7 +159,8 @@ const GAME_HTML = `<!DOCTYPE html>
     }
     snake.unshift(head);
     if (head.x === orb.x && head.y === orb.y) {
-      score += 1;
+      score += golden ? 3 : 1;
+      orbsEaten += 1;
       scoreEl.textContent = score;
       if (score > best) {
         best = score;
@@ -163,11 +184,11 @@ const GAME_HTML = `<!DOCTYPE html>
     }
     var pulse = 0.65 + 0.35 * Math.sin(performance.now() / 180);
     ctx.save();
-    ctx.shadowColor = '#c41c83';
+    ctx.shadowColor = golden ? '#ffd23f' : '#c41c83';
     ctx.shadowBlur = 22 * pulse;
-    ctx.fillStyle = '#ff4da6';
+    ctx.fillStyle = golden ? '#ffd23f' : '#ff4da6';
     ctx.beginPath();
-    ctx.arc(orb.x * CELL + CELL / 2, orb.y * CELL + CELL / 2, CELL * 0.32, 0, Math.PI * 2);
+    ctx.arc(orb.x * CELL + CELL / 2, orb.y * CELL + CELL / 2, CELL * (golden ? 0.42 : 0.32), 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
     for (var i = snake.length - 1; i >= 0; i--) {
@@ -183,6 +204,17 @@ const GAME_HTML = `<!DOCTYPE html>
       ctx.fill();
       ctx.restore();
     }
+    if (paused) {
+      ctx.fillStyle = 'rgba(13,11,13,0.55)';
+      ctx.fillRect(0, 0, 720, 720);
+      ctx.fillStyle = '#ffd23f';
+      ctx.font = 'bold 44px "Segoe UI", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('PAUSED', 360, 360);
+      ctx.font = '20px "Segoe UI", Arial, sans-serif';
+      ctx.fillStyle = '#d8d2dc';
+      ctx.fillText('press Space to resume', 360, 400);
+    }
   }
   function loop(now) {
     tick(now);
@@ -195,6 +227,11 @@ const GAME_HTML = `<!DOCTYPE html>
     W: { x: 0, y: -1 }, S: { x: 0, y: 1 }, A: { x: -1, y: 0 }, D: { x: 1, y: 0 } };
   document.addEventListener('keydown', function (e) {
     if (e.key === 'r' || e.key === 'R') { resetGame(); return; }
+    if (e.key === ' ' || e.key === 'p' || e.key === 'P') {
+      e.preventDefault();
+      togglePause();
+      return;
+    }
     var d = KEYS[e.key];
     if (d) {
       e.preventDefault();

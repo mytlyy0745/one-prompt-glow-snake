@@ -115,26 +115,51 @@ const GAME_HTML = `<!DOCTYPE html>
     }
   }
   function autoDir() {
-    // Greedy autopilot: head for the orb, never turn into a wall or the body.
+    // Autopilot: head for the orb, but never box the snake in — a move only
+    // counts when the flood-fill from the new head still leaves at least as
+    // much empty room as the snake is long. Among such moves, prefer the
+    // roomiest, then the closest to the orb.
     var head = snake[0];
     var opts = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
-    var safe = [];
+    function blocked(x, y) {
+      if (x < 0 || y < 0 || x >= N || y >= N) return true;
+      for (var j = 0; j < snake.length - 1; j++) {
+        if (snake[j].x === x && snake[j].y === y) return true;
+      }
+      return false;
+    }
+    function roomFrom(x, y) {
+      var seen = {}, q = [{ x: x, y: y }], n = 0;
+      seen[x + ',' + y] = true;
+      while (q.length) {
+        var c = q.pop();
+        n++;
+        var nb = [{ x: c.x + 1, y: c.y }, { x: c.x - 1, y: c.y },
+                  { x: c.x, y: c.y + 1 }, { x: c.x, y: c.y - 1 }];
+        for (var i = 0; i < nb.length; i++) {
+          var k = nb[i].x + ',' + nb[i].y;
+          if (!seen[k] && !blocked(nb[i].x, nb[i].y)) { seen[k] = true; q.push(nb[i]); }
+        }
+      }
+      return n;
+    }
+    var cands = [];
     for (var i = 0; i < opts.length; i++) {
       var d = opts[i];
       if (d.x === -dir.x && d.y === -dir.y) continue;
       var nx = head.x + d.x, ny = head.y + d.y;
-      if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
-      var hit = false;
-      for (var j = 0; j < snake.length - 1; j++) {
-        if (snake[j].x === nx && snake[j].y === ny) { hit = true; break; }
-      }
-      if (!hit) safe.push(d);
+      if (blocked(nx, ny)) continue;
+      var eating = nx === orb.x && ny === orb.y;
+      var room = roomFrom(nx, ny);
+      if (room >= snake.length || eating) cands.push({ d: d, room: room });
     }
-    if (!safe.length) return dir;
-    var bestD = safe[0], bestDist = 1e9;
-    for (var k = 0; k < safe.length; k++) {
-      var dd = Math.abs(head.x + safe[k].x - orb.x) + Math.abs(head.y + safe[k].y - orb.y);
-      if (dd < bestDist) { bestDist = dd; bestD = safe[k]; }
+    if (!cands.length) return dir;
+    var bestD = cands[0].d, bestRoom = -1, bestDist = 1e9;
+    for (var k = 0; k < cands.length; k++) {
+      var dd = Math.abs(head.x + cands[k].d.x - orb.x) + Math.abs(head.y + cands[k].d.y - orb.y);
+      if (cands[k].room > bestRoom || (cands[k].room === bestRoom && dd < bestDist)) {
+        bestRoom = cands[k].room; bestDist = dd; bestD = cands[k].d;
+      }
     }
     return bestD;
   }

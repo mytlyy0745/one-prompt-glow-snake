@@ -8,7 +8,9 @@
 // stand in for /bot and /output:
 //   mkdir -p out && MAKEFUN_BOT_DIR=. MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const BOT_DIR = process.env.MAKEFUN_BOT_DIR ?? '/bot';
@@ -274,6 +276,28 @@ const GAME_HTML = `<!DOCTYPE html>
 </html>
 `;
 
+if (process.argv.includes('--check')) {
+  // Determinism self-check: generate the game twice into temp dirs and
+  // require byte-identical output, then exit without touching /output.
+  const dirA = mkdtempSync(join(tmpdir(), 'glow-snake-a-'));
+  const dirB = mkdtempSync(join(tmpdir(), 'glow-snake-b-'));
+  try {
+    writeFileSync(join(dirA, 'index.html'), GAME_HTML);
+    writeFileSync(join(dirB, 'index.html'), GAME_HTML);
+    const a = readFileSync(join(dirA, 'index.html'));
+    const b = readFileSync(join(dirB, 'index.html'));
+    if (!a.equals(b)) {
+      console.error('--check FAILED: the two generated games differ');
+      process.exit(1);
+    }
+    console.log(`--check OK: deterministic output (${GAME_HTML.length} bytes)`);
+  } finally {
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
+  }
+  process.exit(0);
+}
+
 mkdirSync(OUTPUT_DIR, { recursive: true });
 try {
   copyFileSync(join(BOT_DIR, 'POST.json'), join(OUTPUT_DIR, 'POST.json'));
@@ -282,4 +306,5 @@ try {
   process.exit(1);
 }
 writeFileSync(join(OUTPUT_DIR, 'index.html'), GAME_HTML);
-console.log(`wrote ${join(OUTPUT_DIR, 'index.html')} (${GAME_HTML.length} bytes)`);
+const digest = createHash('sha256').update(GAME_HTML).digest('hex');
+console.log(`wrote ${join(OUTPUT_DIR, 'index.html')} (${GAME_HTML.length} bytes, sha256 ${digest})`);
